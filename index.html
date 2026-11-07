@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TITAN SALVAGE</title>
+<style>
+:root{--a:#ff9a1f;--bg:#0b0e13;--p:#151b24;--t:#dfe8f2}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--t);font:14px/1.4 system-ui,sans-serif;user-select:none}
+#c,canvas{position:fixed;inset:0;display:block}
+.scr{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(5,8,12,.78);text-align:center;padding:16px;overflow:auto;z-index:5}
+.scr.on{display:flex}.side{align-items:flex-start;justify-content:flex-start;text-align:left;width:min(480px,100%);right:auto;background:rgba(5,8,12,.9)}
+h1{font-size:clamp(30px,8vw,74px);letter-spacing:.14em;margin:0;color:var(--a);text-shadow:0 0 30px #ff7a0066}h2,h3{margin:6px 0;color:var(--a);letter-spacing:.1em}
+button{background:var(--p);color:var(--t);border:1px solid var(--a);padding:9px 16px;font:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:.08em}
+button:hover:not(:disabled){background:var(--a);color:#000}button:disabled{opacity:.35;cursor:default}
+.card{background:var(--p);border:1px solid #2a3544;padding:10px 14px;width:min(300px,100%);text-align:left}.row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.line{display:flex;justify-content:space-between;gap:8px;align-items:center;width:100%;background:var(--p);border:1px solid #2a3544;padding:6px 10px;margin:2px 0}.line small{opacity:.65;display:block}
+.dim{opacity:.65;max-width:620px}
+#hud{position:fixed;inset:0;pointer-events:none;display:none;z-index:2}
+#obj{position:absolute;top:10px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 0 6px #000;font-size:15px}
+#boss{position:absolute;top:70px;left:50%;transform:translateX(-50%);width:min(520px,80vw);text-align:center;display:none}
+#boss i,.b i{display:block;background:#0008;border:1px solid #fff4;height:12px}#boss u{display:block;height:100%;background:#e33;width:100%}
+#cross{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px;border:2px solid #fff9;border-radius:50%}#cross:after{content:"";position:absolute;left:10px;top:10px;width:2px;height:2px;background:#fff}
+#msg{position:absolute;top:30%;width:100%;text-align:center;font-size:28px;letter-spacing:.2em;color:var(--a);text-shadow:0 0 10px #000}
+#bars{position:absolute;left:14px;bottom:14px;background:#0007;padding:8px 10px}.b{display:flex;align-items:center;gap:6px;margin:3px 0}.b span{width:52px;font-size:11px}.b i{width:210px;height:10px}.b u{display:block;height:100%;width:0}
+#wp{position:absolute;right:14px;bottom:14px;background:#0007;padding:8px 12px;text-align:right}#wp b{color:var(--a)}#wp span{display:inline-block;margin:4px 0 0 8px;opacity:.5;font-size:12px}#wp span.rdy{opacity:1;color:#7f7}
+#big{position:fixed;left:0;right:0;bottom:18%;text-align:center;z-index:4;display:none;pointer-events:none}#big h1{font-size:clamp(34px,9vw,96px);color:#f43}
+#vig{position:absolute;inset:0;box-shadow:inset 0 0 120px #f00;opacity:0}
+@media(max-width:600px){#bars{transform:scale(.85);transform-origin:left bottom}#wp{transform:scale(.85);transform-origin:right bottom}}
+</style></head><body>
+<div id="c"></div>
+<div id="hud"><div id="vig"></div><div id="obj"></div><div id="boss"><b id="bn"></b><i><u id="bb"></u></i><small id="bp"></small></div><div id="cross"></div><div id="msg"></div><div id="bars"></div><div id="wp"></div></div>
+<div id="big"></div>
+<div class="scr on" id="menu"><h1>TITAN SALVAGE</h1><p class="dim">Pilot a giant mech. Scavenge the wrecks. Upgrade in the hangar. Bring down TITAN PRIME.</p>
+<div class="row"><button data-a="mis">Deploy</button><button data-a="hangar">Hangar</button><button data-a="reset">Reset save</button></div>
+<p class="dim">WASD move · Mouse aim (click to lock) · LMB primary · RMB / E secondary · Space jump jets · Shift dash · F melee · Q overdrive · C switch camera · Esc / P pause · Arrow keys turn if mouse lock is unavailable</p></div>
+<div class="scr" id="mis"></div><div class="scr side" id="hangar"></div>
+<div class="scr" id="pause"><h1 style="font-size:48px">PAUSED</h1><div class="row"><button data-a="resume">Resume</button><button data-a="restart">Restart</button><button data-a="abort">Abort mission</button></div></div>
+<div class="scr" id="res"></div>
+<div class="scr" id="err"><h1>ERROR</h1><p></p><button onclick="location.reload()">Reload</button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id),SC=['menu','mis','hangar','pause','res','err'];
+function show(id){SC.forEach(s=>$(s).classList.toggle('on',s===id))}
+function hideAll(){SC.forEach(s=>$(s).classList.remove('on'))}
+function fail(t){$('err').querySelector('p').textContent=t;show('err');$('hud').style.display='none'}
+if(typeof THREE==='undefined'){fail('The Three.js library could not be loaded. Check your internet connection (it is fetched from cdnjs.cloudflare.com) and reload.');return}
+let R;try{R=new THREE.WebGLRenderer({antialias:true});if(!R.getContext())throw 0}catch(e){fail('WebGL is not available in this browser or device. Enable hardware acceleration or try a current Chrome, Edge or Firefox.');return}
+R.setPixelRatio(Math.min(devicePixelRatio||1,2));$('c').appendChild(R.domElement);
+const cam=new THREE.PerspectiveCamera(65,1,.1,700),V3=(x,y,z)=>new THREE.Vector3(x,y,z),clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rnd=(a,b)=>a+Math.random()*(b-a);
+function rs(){const w=innerWidth,h=innerHeight;R.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix()}
+addEventListener('resize',rs);rs();
+/* ---------- data ---------- */
+const W={
+mg:{n:'Gatling Gun',t:'bullet',rate:.07,dmg:6,heat:3.4,spd:95,ammo:500,w:0,col:0xffe080,cost:[0,0],d:'Rapid fire, low heat, light'},
+rocket:{n:'Rocket Pods',t:'rocket',rate:.7,dmg:42,heat:12,spd:42,spl:7,ammo:40,w:.06,col:0xff6020,cost:[0,0],d:'Explosive rockets, splash damage'},
+rail:{n:'Railgun',t:'rail',rate:1.7,dmg:140,heat:40,ammo:20,w:.12,col:0x66ccff,cost:[260,2],d:'Piercing hitscan, huge heat, heavy'},
+blade:{n:'Energy Blade',t:'blade',rate:.45,dmg:60,heat:8,ammo:Infinity,w:0,col:0x44ffee,range:13,cost:[200,1],d:'Close arc slash, no ammo'},
+flame:{n:'Flamethrower',t:'flame',rate:.05,dmg:3.4,heat:2.6,ammo:320,w:.03,col:0xff7722,range:22,cost:[180,1],d:'Short cone burn, runs hot'},
+art:{n:'Artillery',t:'art',rate:2.4,dmg:115,heat:30,spd:46,spl:13,ammo:12,w:.18,col:0xffdd44,cost:[320,3],d:'Lobbed shells, massive blast, very heavy'}};
+const ED={g:{hp:60,sp:9,rg:55,rate:1.5,dmg:9,s:.55,c:0xb03030},c:{hp:110,sp:17,rg:0,rate:1.2,dmg:26,s:.7,c:0xc87020},f:{hp:70,sp:13,rg:42,rate:.6,dmg:5,s:.5,c:0x8a3ab0},a:{hp:90,sp:5,rg:95,rate:3.2,dmg:30,s:.75,c:0xb0a030}};
+const M=[
+{n:'Scrapyard Skirmish',d:'Destroy 12 hostile machines in the dust fields.',k:'kill',tot:12,cap:5,ty:'ggc',sky:0xc9a074,gr:0x7d6847,ob:0x8c7a5c,fog:.005,ch:{t:'time',v:170,l:'Finish under 2:50'},rw:[150,0],deco:0},
+{n:'Foundry Freeze',d:'Wreck 3 reactor generators guarded by flankers.',k:'gen',tot:3,cap:6,ty:'gfgf',sky:0x9db8d6,gr:0xcfdde8,ob:0x6a8aa8,fog:.006,ch:{t:'nohit',l:'Take no hull damage'},rw:[220,1],deco:1},
+{n:'Magma Rift',d:'Survive artillery lines. Destroy 16 machines.',k:'kill',tot:16,cap:7,ty:'gcfa',sky:0x3a1410,gr:0x2a1a16,ob:0x4a2a22,fog:.008,ch:{t:'cool',l:'Never overheat'},rw:[300,1],deco:2},
+{n:'TITAN PRIME',d:'Destroy the colossal war machine.',k:'boss',tot:1,cap:3,ty:'gc',sky:0x14182a,gr:0x1c2230,ob:0x2c3548,fog:.007,ch:{t:'time',v:300,l:'Win within 5:00'},rw:[600,3],deco:3}];
+let S;try{S=JSON.parse(localStorage.getItem('titan-salvage-1'))}catch(e){}
+const SD=()=>({scrap:0,rare:0,up:{spd:0,arm:0,rea:0,heat:0},own:['mg','rocket'],p:'mg',s:'rocket',clr:[],ch:[]});
+S=Object.assign(SD(),S||{});const save=()=>{try{localStorage.setItem('titan-salvage-1',JSON.stringify(S))}catch(e){}};
+/* ---------- models ---------- */
+const mat=(c,e,m)=>new THREE.MeshStandardMaterial({color:c,emissive:e||0,metalness:m==null?.6:m,roughness:.5,flatShading:true});
+const MBc={},MB=c=>MBc[c]||(MBc[c]=new THREE.MeshBasicMaterial({color:c}));
+function bx(w,h,d,m,x,y,z,p){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);if(p)p.add(o);return o}
+function buildMech(c,a,w1,w2,en){const g=new THREE.Group(),Mt=mat(c),A=mat(a),D=mat(0x23272e),r={g,legs:[],arms:[],thr:[]};
+bx(4.6,1.6,3,D,0,7,0,g);
+[-1,1].forEach(s=>{const h=new THREE.Group();h.position.set(s*1.8,6.8,0);g.add(h);bx(1.5,3.4,1.7,Mt,0,-1.7,0,h);const k=new THREE.Group();k.position.y=-3.4;h.add(k);bx(1.3,3.6,1.5,A,0,-1.8,.2,k);bx(2.1,.7,3.2,D,0,-3.7,.6,k);r.legs.push({h,k,s})});
+bx(6,3.8,4,Mt,0,9.6,0,g);bx(4.4,2,.6,A,0,10.2,2.2,g);bx(2.4,1.6,2.2,D,0,12.3,.3,g);bx(2.2,.7,.5,mat(0x111111,en?0xff2200:0x33ddff),0,12.4,1.5,g);
+[-1,1].forEach((s,i)=>{bx(2.2,1.6,3,A,s*3.9,11.5,0,g);const a1=new THREE.Group();a1.position.set(s*4.2,10,0);g.add(a1);bx(1.4,3,1.5,Mt,0,-1.5,0,a1);
+const gn=new THREE.Group();gn.position.set(0,-3,.4);a1.add(gn);bx(1.1,1.1,4.2,D,0,0,2,gn);bx(1.3,.5,2,new THREE.MeshBasicMaterial({color:i?w2:w1}),0,.8,1.6,gn);const tip=new THREE.Object3D();tip.position.set(0,0,4.4);gn.add(tip);r.arms.push({a:a1,tip,s})});
+if(!en)[-1,1].forEach(s=>{const cy=new THREE.Mesh(new THREE.CylinderGeometry(.8,1,2.4,8),D);cy.position.set(s*1.6,10,-2.6);g.add(cy);const f=new THREE.Mesh(new THREE.ConeGeometry(.7,3,8),new THREE.MeshBasicMaterial({color:0xffaa33}));f.rotation.x=Math.PI;f.position.set(s*1.6,8,-2.6);g.add(f);r.thr.push(f)});
+return r}
+function walk(r,t,amt){r.legs.forEach(l=>{const ph=t*8+(l.s>0?0:Math.PI);l.h.rotation.x=Math.sin(ph)*.7*amt;l.k.rotation.x=Math.max(0,-Math.sin(ph))*.9*amt})}
+/* ---------- hangar scene ---------- */
+const hs=new THREE.Scene();hs.background=new THREE.Color(0x0a0d12);hs.fog=new THREE.Fog(0x0a0d12,45,130);
+hs.add(new THREE.HemisphereLight(0x8899bb,0x221810,.8));{const d=new THREE.DirectionalLight(0xffffff,1.2);d.position.set(15,30,20);hs.add(d)}
+[0xff8a20,0x33aaff].forEach((c,i)=>{const l=new THREE.PointLight(c,1.6,70);l.position.set(i?-18:18,10,-8);hs.add(l)});
+{const p=new THREE.Mesh(new THREE.CylinderGeometry(11,12,1,32),mat(0x2a313b));p.position.y=-.5;hs.add(p);const r=new THREE.Mesh(new THREE.TorusGeometry(10,.2,6,48),MB(0xff9a1f));r.rotation.x=Math.PI/2;hs.add(r);
+for(let i=0;i<9;i++){bx(6,26,1,mat(0x1a2029),-40+i*10,10,-30,hs);bx(.4,22,.2,MB(0xff9a1f),-40+i*10,10,-29.4,hs)}}
+let hm;function rebuildHM(){if(hm)hs.remove(hm.g);hm=buildMech(0x5c6b7a,0xe08a1e,W[S.p].col,W[S.s].col);hs.add(hm.g)}
+/* ---------- state ---------- */
+let state='menu',mi=0,m,sc,P,G,E=[],PJ=[],FX=[],PK=[],OB=[],fl;const keys={},mouse={},aim=V3(0,0,-50),clock=new THREE.Clock();
+const SG=new THREE.SphereGeometry(1,8,6),BG=new THREE.BoxGeometry(1,1,1),GB=new THREE.BoxGeometry(.25,.25,1.8),GR=new THREE.BoxGeometry(.6,.6,2.2),RG=new THREE.RingGeometry(.8,1,40),CG=new THREE.CylinderGeometry(1,1,1,6),OG=new THREE.OctahedronGeometry(1.1);
+let msgT=0;function msg(s,t){$('msg').textContent=s;msgT=t||2}
+/* ---------- fx ---------- */
+function fx(g,col,pos,vel,life,s0,s1,op,gr,fixed){const mm=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:op,side:2}));mm.position.copy(pos);mm.scale.setScalar(s0);sc.add(mm);FX.push({m:mm,v:vel||V3(0,0,0),l:life,L:life,s0,s1,op,gr:gr||0,fixed});if(FX.length>380){const o=FX.shift();sc.remove(o.m);o.m.material.dispose()}return mm}
+function updFX(dt){for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.l-=dt;if(f.l<=0){sc.remove(f.m);f.m.material.dispose();FX.splice(i,1);continue}const t=1-f.l/f.L;if(!f.fixed)f.m.scale.setScalar(f.s0+(f.s1-f.s0)*t);f.m.material.opacity=f.op*(1-t);f.m.position.addScaledVector(f.v,dt);f.v.y-=f.gr*dt}
+if(fl)fl.intensity=Math.max(0,fl.intensity-dt*18)}
+function flash(p,col){fx(SG,col,p,null,.07,1,2.2,.9);if(fl){fl.position.copy(p);fl.color.setHex(col);fl.intensity=2.5}}
+function boom(p,r,col){col=col||0xff8a30;fx(SG,0xffe0a0,p,null,.25,r*.3,r*1.1,.9);fx(SG,col,p,null,.55,r*.2,r*.85,.6);
+for(let i=0;i<9;i++)fx(BG,0xffd060,p,V3(rnd(-1,1)*22,rnd(0,1)*22,rnd(-1,1)*22),.7,.4,.1,1,32);
+for(let i=0;i<5;i++)fx(SG,0x444444,p.clone().add(V3(rnd(-1,1)*r*.4,0,rnd(-1,1)*r*.4)),V3(rnd(-1,1)*2,rnd(3,6),rnd(-1,1)*2),1.8,r*.3,r*.9,.55);
+if(fl){fl.position.copy(p);fl.color.setHex(col);fl.intensity=Math.min(7,r/1.5)}G.shake=Math.max(G.shake,Math.min(1,r/16))}
+/* ---------- world ---------- */
+function buildWorld(){const s=new THREE.Scene();s.background=new THREE.Color(m.sky);s.fog=new THREE.FogExp2(m.sky,m.fog);
+s.add(new THREE.HemisphereLight(m.sky,m.gr,.9));const d=new THREE.DirectionalLight(0xffffff,1.1);d.position.set(60,100,40);s.add(d);fl=new THREE.PointLight(0xffaa55,0,70);s.add(fl);
+const g=new THREE.Mesh(new THREE.PlaneGeometry(700,700),mat(m.gr,0,.1));g.rotation.x=-Math.PI/2;s.add(g);
+const gh=new THREE.GridHelper(260,52,0xffffff,0xffffff);gh.material.transparent=true;gh.material.opacity=.06;gh.position.y=.05;s.add(gh);
+OB=[];for(let i=0;i<22;i++){let x,z;do{x=rnd(-100,100);z=rnd(-100,100)}while(Math.hypot(x,z-50)<22||Math.hypot(x,z)>108);const r=rnd(4,9),h=rnd(9,22),o=new THREE.Mesh(new THREE.CylinderGeometry(r*.8,r,h,i%2?5:7),mat(m.ob,m.deco==3&&i%3==0?0x112244:0,.2));o.position.set(x,h/2,z);o.rotation.y=Math.random()*3;s.add(o);OB.push({x,z,r:r*.9,h})}
+for(let i=0;i<16;i++){const a=i/16*6.283,h=rnd(40,90),c=new THREE.Mesh(new THREE.ConeGeometry(rnd(25,45),h,6),mat(m.ob,0,.1));c.position.set(Math.cos(a)*rnd(190,240),h/2,Math.sin(a)*rnd(190,240));s.add(c)}
+if(m.deco==2)for(let i=0;i<12;i++){const c=new THREE.Mesh(new THREE.CircleGeometry(rnd(6,14),12),MB(0xff4a10));c.rotation.x=-Math.PI/2;c.position.set(rnd(-110,110),.08,rnd(-110,110));s.add(c)}
+return s}
+function collide(o,rad){for(const b of OB){const dx=o.x-b.x,dz=o.z-b.z,d=Math.hypot(dx,dz),mn=b.r+rad;if(d<mn&&d>.001&&(o.y||0)<b.h){o.x=b.x+dx/d*mn;o.z=b.z+dz/d*mn}}const l=Math.hypot(o.x,o.z);if(l>115){o.x*=115/l;o.z*=115/l}}
+function mv(e,dx,dz,rad){e.x+=dx;e.z+=dz;collide(e,rad)}
+/* ---------- projectiles ---------- */
+function proj(o,d,w,dm,own,x){const rk=w.t=='rocket',mm=new THREE.Mesh(rk?GR:GB,MB(w.col));mm.position.copy(o);mm.lookAt(o.clone().add(d));sc.add(mm);PJ.push({m:mm,v:d.clone().multiplyScalar(w.spd),dmg:w.dmg*dm,spl:w.spl||0,own,l:5,g:0,rk,col:w.col,home:x&&x.home,tr:0})}
+function lob(o,tg,w,dm,own){const dx=tg.x-o.x,dz=tg.z-o.z,t=Math.max(.7,Math.hypot(dx,dz)/w.spd),g=28,mm=new THREE.Mesh(SG,MB(w.col));mm.scale.setScalar(.9);mm.position.copy(o);sc.add(mm);PJ.push({m:mm,v:V3(dx/t,(tg.y-o.y+.5*g*t*t)/t,dz/t),dmg:w.dmg*dm,spl:w.spl,own,l:8,g,col:w.col,tr:0})}
+const ec=e=>V3(e.x,e.cy,e.z);
+function splash(p,r,dmg,own){if(own=='p'){for(const e of E.slice()){const d=ec(e).distanceTo(p);if(d<r+e.rad*.6)dmgE(e,dmg*(1-Math.min(.7,d/(r*1.8))),p.clone())}}else{const d=V3(P.x,P.y+6,P.z).distanceTo(p);if(d<r+2)dmgP(dmg*(1-Math.min(.8,d/(r*2))))}}
+function updPJ(dt){for(let i=PJ.length-1;i>=0;i--){const p=PJ[i],ps=p.m.position;
+if(p.home){const dd=V3(P.x-ps.x,P.y+6-ps.y,P.z-ps.z).normalize().multiplyScalar(p.v.length());p.v.lerp(dd,dt*1.4)}
+if(p.g)p.v.y-=p.g*dt;ps.addScaledVector(p.v,dt);if(!p.g)p.m.lookAt(ps.clone().add(p.v));p.l-=dt;
+if(p.rk||p.g){p.tr-=dt;if(p.tr<=0){p.tr=.04;fx(SG,0x888888,ps,V3(0,1,0),.7,.5,1.6,.5)}}
+let hit=ps.y<.3||p.l<=0;
+if(!hit)for(const o of OB)if(ps.y<o.h&&Math.hypot(ps.x-o.x,ps.z-o.z)<o.r){hit=true;break}
+if(!hit){if(p.own=='p'){for(const e of E)if(ec(e).distanceTo(ps)<e.rad+.5){hit=true;if(!p.spl)dmgE(e,p.dmg,ps.clone());break}}
+else if(Math.hypot(ps.x-P.x,ps.z-P.z)<3.4&&ps.y<P.y+12&&ps.y>P.y-1){hit=true;if(!p.spl)dmgP(p.dmg)}}
+if(hit){if(p.spl){boom(ps.clone(),p.spl*.8,p.col);splash(ps.clone(),p.spl,p.dmg,p.own)}else for(let k=0;k<3;k++)fx(BG,p.col,ps,V3(rnd(-1,1)*12,rnd(0,1)*12,rnd(-1,1)*12),.3,.3,.05,1,20);sc.remove(p.m);PJ.splice(i,1)}}}
+/* ---------- damage ---------- */
+const tmp=V3(0,0,0);
+function dmgE(e,n,pt){if(e.dead)return;
+if(e.boss){let pp=null;for(const p of e.pl)if(p.hp>0){p.m.getWorldPosition(tmp);if(tmp.distanceTo(pt)<3.6){pp=p;break}}
+if(pp){pp.hp-=n;e.hp-=n*.12;if(pp.hp<=0){pp.m.visible=false;boom(tmp.clone(),6,0xff5522);G.shake=.8;msg('ARMOR PLATE DESTROYED',1.5)}}
+else{e.core.getWorldPosition(tmp);const hit=tmp.distanceTo(pt)<3.2,al=e.pl.some(p=>p.hp>0);e.hp-=n*(hit?(al?.35:2.2):.15)}}
+else e.hp-=n;
+fx(BG,0xffcc66,pt,V3(rnd(-1,1)*10,rnd(0,1)*10,rnd(-1,1)*10),.25,.3,.05,1,25);
+if(e.hp<=0)killE(e)}
+function dmgP(n){if(P.dsh>0||P.dead||state!='play')return;let a=0;if(P.ar>0){a=Math.min(P.ar,n*.7);P.ar-=a}const h=n-a;P.hp-=h;if(h>0)G.hit=true;G.shake=Math.max(G.shake,.3);G.vig=.5;
+if(P.hp<=0&&!P.dead){P.dead=true;P.r.g.visible=false;boom(V3(P.x,6,P.z),16);G.endT=1.8;G.win=false;msg('MECH DESTROYED',3)}}
+function drop(x,z,k,v){const mm=new THREE.Mesh(OG,MB(k=='scrap'?0xffcc33:k=='rare'?0xcc55ff:0x55ff77));mm.position.set(x+rnd(-3,3),1.8,z+rnd(-3,3));sc.add(mm);PK.push({m:mm,k,v,l:45})}
+function killE(e){e.dead=true;sc.remove(e.g);E.splice(E.indexOf(e),1);const p=ec(e);boom(p,e.boss?22:e.t=='gen'?12:6.5,e.t=='gen'?0x44ffcc:0xff8a30);
+const f=1+mi*.4,n=e.boss?10:e.t=='gen'?4:rnd(1,3)|0+1;for(let i=0;i<n;i++)drop(e.x,e.z,'scrap',Math.round(rnd(10,25)*f));
+if(e.boss){for(let i=0;i<3;i++)drop(e.x,e.z,'rare',1);G.bx=p;G.endT=4;G.win=true;msg('TITAN PRIME DESTROYED',4)}else{if(Math.random()<(e.t=='gen'?.4:.14))drop(e.x,e.z,'rare',1);if(Math.random()<.18)drop(e.x,e.z,'rep',1)}
+if(e.t=='gen')G.gens++;else if(!e.boss&&e.t!='min')G.kills++;
+if(G.endT<=0&&(m.k=='kill'&&G.kills>=m.tot||m.k=='gen'&&G.gens>=m.tot)){G.endT=1.6;G.win=true;msg('OBJECTIVE COMPLETE',2)}}
+function updPK(dt){for(let i=PK.length-1;i>=0;i--){const k=PK[i],ps=k.m.position;k.m.rotation.y+=dt*3;k.l-=dt;const d=Math.hypot(P.x-ps.x,P.z-ps.z);
+if(d<20&&!P.dead){const s=34*dt/Math.max(d,1);ps.x+=(P.x-ps.x)*s;ps.z+=(P.z-ps.z)*s}ps.y=1.8+Math.sin(G.t*4+i)*.4;
+if(d<5&&!P.dead||k.l<=0){if(d<5){if(k.k=='scrap')G.scrap+=k.v;else if(k.k=='rare'){G.rare++;msg('RARE COMPONENT',1.2)}else{P.hp=Math.min(P.mhp,P.hp+60);P.ar=Math.min(P.mar,P.ar+90);[S.p,S.s].forEach(q=>{if(W[q].ammo!==Infinity)P.ammo[q]=Math.min(W[q].ammo,P.ammo[q]+W[q].ammo*.3)});msg('REPAIR + RESUPPLY',1.2)}}sc.remove(k.m);PK.splice(i,1)}}}
+/* ---------- player ---------- */
+function mkP(){const u=S.up,r=buildMech(0x5c6b7a,0xe08a1e,W[S.p].col,W[S.s].col);sc.add(r.g);
+P={r,x:0,y:0,z:50,vy:0,vx:0,vz:0,yaw:0,pit:.15,hp:400,mhp:400,mar:200+60*u.arm,ar:200+60*u.arm,heat:0,over:false,fm:100+12*u.rea,fuel:100+12*u.rea,wt:{p:0,s:0},cd:{dash:0,mel:0,od:0},od:0,dsh:0,ammo:{},dead:false,rad:3.2,wlk:0};
+[S.p,S.s].forEach(k=>P.ammo[k]=W[k].ammo)}
+function moveP(dt){const u=S.up,cdf=1-.08*u.rea,wt=W[S.p].w+W[S.s].w,spd=20*(1+.1*u.spd)*(1-wt)*(P.od>0?1.25:1);
+for(const k in P.cd)P.cd[k]=Math.max(0,P.cd[k]-dt);P.od=Math.max(0,P.od-dt);P.dsh=Math.max(0,P.dsh-dt);for(const k in P.wt)P.wt[k]-=dt;
+if(P.dead){walk(P.r,0,0);return}
+if(keys.ArrowLeft)P.yaw+=1.8*dt;if(keys.ArrowRight)P.yaw-=1.8*dt;if(keys.ArrowUp)P.pit=clamp(P.pit+dt,-.45,.7);if(keys.ArrowDown)P.pit=clamp(P.pit-dt,-.45,.7);
+let ix=(keys.KeyD?1:0)-(keys.KeyA?1:0),iz=(keys.KeyW?1:0)-(keys.KeyS?1:0);const l=Math.hypot(ix,iz)||1;ix/=l;iz/=l;
+const fx_=-Math.sin(P.yaw),fz=-Math.cos(P.yaw),rx=Math.cos(P.yaw),rz=-Math.sin(P.yaw),tx=(fx_*iz+rx*ix)*spd,tz=(fz*iz+rz*ix)*spd;
+if((keys.ShiftLeft||keys.ShiftRight)&&P.cd.dash<=0){const dx=ix||iz?tx/spd:fx_,dz=ix||iz?tz/spd:fz;P.vx=dx*60;P.vz=dz*60;P.dsh=.28;P.cd.dash=3*cdf;for(let i=0;i<6;i++)fx(SG,0x88ccff,V3(P.x,rnd(1,8),P.z),null,.4,1.5,3,.4)}
+if(P.dsh<=0){const k=Math.min(1,dt*(P.y>.1?2.5:8));P.vx+=(tx-P.vx)*k;P.vz+=(tz-P.vz)*k}
+const jet=keys.Space&&P.fuel>0;if(jet){P.vy=Math.min(18,P.vy+(P.vy<0?70:36)*dt);P.fuel-=38*dt;if(Math.random()<.6)fx(SG,0xffaa33,V3(P.x+rnd(-1.5,1.5),P.y+8,P.z),V3(0,-14,0),.3,.7,.2,.7)}else if(P.y<=.05)P.fuel=Math.min(P.fm,P.fuel+30*dt);
+P.vy-=30*dt;P.y+=P.vy*dt;if(P.y<0){if(P.vy<-14){G.shake=.4;fx(SG,0x998877,V3(P.x,.5,P.z),null,.6,2,9,.4)}P.y=0;P.vy=0}
+P.x+=P.vx*dt;P.z+=P.vz*dt;collide(P,P.rad);
+if(keys.KeyF&&P.cd.mel<=0){P.cd.mel=2.5*cdf;slash(85*(P.od>0?1.6:1),13);msg('',0)}
+if(keys.KeyQ&&P.cd.od<=0){P.od=7+.8*u.rea;P.cd.od=32*cdf+P.od;msg('OVERDRIVE',1.5);G.shake=.6}
+P.heat=Math.max(0,P.heat-(16+4*u.heat)*dt*(P.over?1.4:1));if(P.over&&P.heat<35)P.over=false;
+const g=P.r.g,sp=Math.hypot(P.vx,P.vz);P.wlk+=dt*(sp>1?1:0)*sp/20;walk(P.r,P.wlk,P.y>.1?.2:Math.min(1,sp/spd+.01)*(sp>1?1:0));
+g.position.set(P.x,P.y+Math.abs(Math.sin(P.wlk*8))*.3*(sp>1&&P.y<.1?1:0),P.z);g.rotation.y=P.yaw+Math.PI;P.r.arms.forEach(a=>a.a.rotation.x=-P.pit*.9-.15);
+P.r.thr.forEach(f=>{f.scale.y=(jet?2:.4)+Math.random()*.3;f.visible=jet||P.od>0||true})}
+function slash(dmg,range){const fxv=-Math.sin(P.yaw),fzv=-Math.cos(P.yaw),c=V3(P.x+fxv*6,6,P.z+fzv*6);fx(SG,0x66ffee,c,V3(fxv*10,0,fzv*10),.25,2,range*.6,.6);G.shake=Math.max(G.shake,.35);
+for(const e of E.slice()){const dx=e.x-P.x,dz=e.z-P.z,d=Math.hypot(dx,dz);if(d<range+e.rad&&(dx*fxv+dz*fzv)/(d||1)>.15){dmgE(e,dmg,V3(e.x-dx/(d||1)*e.rad,e.cy,e.z-dz/(d||1)*e.rad));if(!e.boss&&e.t!='gen'&&!e.dead)mv(e,dx/(d||1)*6,dz/(d||1)*6,e.rad)}}}
+function calcAim(){const f=cam.getWorldDirection(V3(0,0,0));let b=140;for(const e of E){const oc=ec(e).sub(cam.position),t=oc.dot(f);if(t<8)continue;if(oc.lengthSq()-t*t<e.rad*e.rad&&t<b)b=t}
+if(f.y<-.01){const t=-cam.position.y/f.y;if(t<b)b=t}aim.copy(cam.position).addScaledVector(f,b)}
+function fireP(){if(P.dead)return;if(mouse[0])tryFire('p');if(mouse[2]||keys.KeyE)tryFire('s')}
+function tryFire(sl){const k=S[sl],w=W[k];if(P.wt[sl]>0||P.over||P.ammo[k]<=0)return;P.wt[sl]=w.rate/(P.od>0?1.3:1);if(w.ammo!==Infinity)P.ammo[k]--;
+if(!(P.od>0))P.heat+=w.heat;if(P.heat>=100){P.heat=100;P.over=true;G.over=true;msg('OVERHEAT — COOLING',1.5)}
+const tip=P.r.arms[sl=='p'?0:1].tip,o=tip.getWorldPosition(V3(0,0,0)),d=aim.clone().sub(o).normalize(),dm=P.od>0?1.6:1;flash(o,w.col);G.shake=Math.max(G.shake,w.t=='rail'||w.t=='art'?.5:.06);
+switch(w.t){case'bullet':d.x+=rnd(-.02,.02);d.y+=rnd(-.02,.02);proj(o,d.normalize(),w,dm,'p');break;case'rocket':d.x+=rnd(-.015,.015);proj(o,d.normalize(),w,dm,'p');break;
+case'art':lob(o,aim,w,dm,'p');break;case'blade':slash(w.dmg*dm,w.range);break;
+case'rail':{const end=o.clone().addScaledVector(d,150),len=150,bm=fx(CG,0x99ddff,o.clone().addScaledVector(d,len/2),null,.25,1,1,.9,0,true);bm.scale.set(.35,len,.35);bm.quaternion.setFromUnitVectors(V3(0,1,0),d);
+for(const e of E.slice()){const oc=ec(e).sub(o),t=oc.dot(d);if(t>0&&oc.clone().addScaledVector(d,-t).length()<e.rad+1)dmgE(e,w.dmg*dm,o.clone().addScaledVector(d,t))}G.shake=.6;break}
+case'flame':for(let i=0;i<3;i++)fx(SG,Math.random()<.5?0xff7722:0xffcc33,o,d.clone().multiplyScalar(36).add(V3(rnd(-4,4),rnd(-2,5),rnd(-4,4))),.55,.6,3.4,.6,-3);
+for(const e of E.slice()){const v=ec(e).sub(o),dist=v.length();if(dist<w.range+e.rad&&v.normalize().dot(d)>.8)dmgE(e,w.dmg*dm,o.clone().addScaledVector(d,Math.max(1,dist-e.rad)))}break}}
+let camMode=0,camZ=0;
+function camUpd(dt){const y=P.yaw,p=P.pit,sp=Math.hypot(P.vx,P.vz);
+camZ+=((P.dsh>0?1:sp>14?.45:0)-camZ)*Math.min(1,dt*5);
+const hi=camMode==1,D=(hi?23:19)+camZ*6,sh=hi?0:6,c=Math.cos(p*.6),fx_=-Math.sin(y),fz=-Math.cos(y),rx=Math.cos(y),rz=-Math.sin(y);
+let cx=P.x-fx_*D*c+rx*sh,cz=P.z-fz*D*c+rz*sh;const cy=Math.max(3,(hi?P.y+21:P.y*.7+11)-12*Math.sin(p));
+for(const o of OB)if(cy<o.h+1){const dx=cx-o.x,dz=cz-o.z,d=Math.hypot(dx,dz),mn=o.r+2;if(d<mn&&d>.01){cx=o.x+dx/d*mn;cz=o.z+dz/d*mn}}
+cam.position.set(cx,cy,cz);
+const s=G.shake;if(s>0)cam.position.add(V3(rnd(-1,1)*s,rnd(-1,1)*s,rnd(-1,1)*s));G.shake=Math.max(0,s-dt*2);
+const pa=p-(hi?.35:.2);cam.lookAt(cam.position.x+fx_*Math.cos(pa)*40,cam.position.y+Math.sin(pa)*40,cam.position.z+fz*Math.cos(pa)*40);
+const fv=65+camZ*12;if(Math.abs(cam.fov-fv)>.05){cam.fov=fv;cam.updateProjectionMatrix()}}
+/* ---------- enemies ---------- */
+function mkE(t,x,z){let g,e,rig;const hf=1+.4*mi;
+if(t=='gen'){g=new THREE.Group();const cy=new THREE.Mesh(new THREE.CylinderGeometry(3,4,8,8),mat(0x555d68));cy.position.y=4;g.add(cy);const co=new THREE.Mesh(new THREE.SphereGeometry(2.4,10,8),MB(0x44ffcc));co.position.y=10;g.add(co);e={g,t,hp:280*hf,rad:6,cy:8}}
+else{const D=ED[t=='min'?'f':t];rig=buildMech(D.c,0x222222,0xff3322,0xff3322,true);g=rig.g;g.scale.setScalar(D.s);if(t=='a')bx(1.8,1.8,8,mat(0x222222),0,14,2,g);e={g,rig,t,hp:D.hp*hf,rad:6*D.s,cy:6.5*D.s,cd:1+Math.random()*2,stT:Math.random()*2,peek:true,side:Math.random()<.5?1:-1,ph:Math.random()*6}}
+e.x=x;e.z=z;e.mhp=e.hp;g.position.set(x,0,z);sc.add(g);E.push(e);return e}
+function spawnE(t){let x,z;do{const a=Math.random()*6.283,r=rnd(60,105);x=Math.cos(a)*r;z=Math.sin(a)*r}while(Math.hypot(x-P.x,z-P.z)<50);return mkE(t,x,z)}
+function findCover(e){let b=null,bd=1e9;for(const o of OB){const dx=o.x-P.x,dz=o.z-P.z,l=Math.hypot(dx,dz)||1,cx=o.x+dx/l*(o.r+3),cz=o.z+dz/l*(o.r+3),d=Math.hypot(cx-e.x,cz-e.z);if(d<bd&&l>25){bd=d;b={x:cx,z:cz}}}return b}
+function efire(e){const k=P.ar<P.mar*.35?1.5:1,D=ED[e.t=='min'?'f':e.t],o=V3(e.x,e.cy+1,e.z);
+if(e.t=='a')lob(o,V3(P.x+rnd(-4,4),0,P.z+rnd(-4,4)),{spd:38,dmg:D.dmg*k,spl:9,col:0xffcc33},1,'e');
+else proj(o,V3(P.x-o.x+rnd(-2.5,2.5),P.y+6-o.y,P.z-o.z+rnd(-2.5,2.5)).normalize(),{t:'bullet',dmg:D.dmg*k,spd:60,col:0xff4433},1,'e');flash(o,0xff5533)}
+function aiE(e,dt){const D=ED[e.t=='min'?'f':e.t],dx=P.x-e.x,dz=P.z-e.z,d=Math.hypot(dx,dz)||1,nx=dx/d,nz=dz/d,hot=P.ar<P.mar*.35;
+e.g.rotation.y=Math.atan2(nx,nz);e.cd-=dt;e.stT-=dt;let tx=0,tz=0;const t=e.t=='min'?'f':e.t;
+if(t=='c'){tx=nx;tz=nz;if(d<9&&e.cd<=0&&!P.dead){e.cd=1.2;dmgP(D.dmg*(hot?1.5:1));fx(SG,0xffaa33,V3(P.x,6,P.z),null,.25,2,6,.7)}}
+else if(t=='f'){const f=d>D.rg*.7?1:d<20?-1:0;tx=nx*f-nz*e.side;tz=nz*f+nx*e.side;if(e.stT<=0){e.side*=-1;e.stT=rnd(2,4)}if(d<D.rg&&e.cd<=0&&!P.dead){e.cd=D.rate*(hot?.65:1);efire(e)}}
+else{if(e.stT<=0){e.peek=!e.peek;e.stT=e.peek?3.2:rnd(2.2,3.7);if(!e.peek)e.cover=findCover(e)}
+if(e.peek){if(d<D.rg*.5){tx=-nx;tz=-nz}else if(d>D.rg*.9){tx=nx;tz=nz}if(d<D.rg&&e.cd<=0&&!P.dead){e.cd=D.rate*(hot?.65:1)*rnd(.8,1.2);efire(e)}}
+else if(e.cover){const cx=e.cover.x-e.x,cz=e.cover.z-e.z,c=Math.hypot(cx,cz);if(c>2){tx=cx/c;tz=cz/c}}}
+const sp=D.sp;mv(e,tx*sp*dt,tz*sp*dt,e.rad);e.g.position.set(e.x,0,e.z);e.ph+=dt*(Math.hypot(tx,tz)>.1?1:0)*sp/9;walk(e.rig,e.ph,Math.hypot(tx,tz)>.1?1:0)}
+const SH={spd:42,dmg:35,spl:10,col:0xff7733},BL={t:'bullet',dmg:10,spd:65,col:0xff3322},MS={t:'rocket',dmg:22,spl:6,spd:34,col:0xff5522};
+function mkBoss(){const rig=buildMech(0x3a3f4a,0xb02818,0xff2200,0xff2200,true),g=rig.g;g.scale.setScalar(1.9);
+const pl=[[-2.3,11.6],[2.3,11.6],[0,13.3],[0,7.9]].map(a=>({m:bx(2.4,2.1,.8,mat(0x7a1c12,0x300800),a[0],a[1],2.8,g),hp:260,mh:260}));
+const core=new THREE.Mesh(new THREE.SphereGeometry(1.3,12,10),MB(0xffdd33));core.position.set(0,10,2.4);g.add(core);
+const hp=2600+0*mi,e={g,rig,t:'boss',boss:1,pl,core,hp,mhp:hp,rad:10,cy:12,x:0,z:-75,ph:1,a:2,b:1,c:8,s:1,wl:0,stomp:0};g.position.set(0,0,-75);sc.add(g);E.push(e);return e}
+function aiB(e,dt){const dx=P.x-e.x,dz=P.z-e.z,d=Math.hypot(dx,dz)||1,nx=dx/d,nz=dz/d,ph=e.hp>e.mhp*.66?1:e.hp>e.mhp*.33?2:3;
+if(ph!=e.ph){e.ph=ph;e.pl.forEach(p=>{p.hp=p.mh;p.m.visible=true});msg('PHASE '+ph+' — ARMOR RESTORED',3);G.shake=1.3;boom(V3(e.x,12,e.z),22,0xff4411)}
+e.g.rotation.y=Math.atan2(nx,nz);e.a-=dt;e.b-=dt;e.c-=dt;let tx=0,tz=0,sp=7;const o=V3(e.x,20,e.z),aimB=()=>V3(P.x-o.x+rnd(-3,3),P.y+6-o.y,P.z-o.z).normalize();
+if(ph==1){const f=d>48?1:d<30?-1:0;tx=nx*f;tz=nz*f;if(e.a<=0){e.a=3.5;for(let i=-1;i<=1;i++)lob(o,V3(P.x+i*10,0,P.z+i*6),SH,1,'e');msg('INCOMING SHELLS',1)}if(e.b<=0){e.b=.45;proj(o,aimB(),BL,1,'e')}}
+else if(ph==2){if(Math.random()<.01)e.s*=-1;tx=-nz*e.s+nx*(d>40?1:d<25?-1:0);tz=nx*e.s+nz*(d>40?1:d<25?-1:0);
+if(e.a<=0){e.a=4.5;for(let i=0;i<6;i++)proj(o,V3(P.x-o.x+(i-2.5)*14,P.y+16-o.y,P.z-o.z).normalize(),MS,1,'e',{home:1})}
+if(e.c<=0){e.c=14;for(let i=0;i<2;i++)mkE('min',e.x+(i?18:-18),e.z+10)}if(e.b<=0){e.b=.5;proj(o,aimB(),BL,1,'e')}}
+else{sp=d>16?20:2;tx=nx;tz=nz;if(e.b<=0){e.b=.25;proj(o,aimB(),BL,1,'e')}if(e.c<=0){e.c=5;lob(o,V3(P.x,0,P.z),SH,1,'e')}
+if(d<18&&e.a<=0){e.a=3;G.shake=1;const r=fx(RG,0xff5522,V3(e.x,.3,e.z),null,.6,1,28,.8);r.rotation.x=-Math.PI/2;if(P.y<2.5&&d<28)dmgP(45);msg('JUMP!',.8)}}
+mv(e,tx*sp*dt,tz*sp*dt,8);e.g.position.set(e.x,0,e.z);e.wl+=dt*sp/10;walk(e.rig,e.wl,sp>3?.6:0)}
+function updE(dt){for(const e of E.slice()){if(e.t=='gen'){e.g.children[1].scale.setScalar(1+Math.sin(G.t*5)*.1);continue}if(e.boss)aiB(e,dt);else aiE(e,dt)}}
+/* ---------- mission flow ---------- */
+function startMission(i){mi=i;m=M[i];sc=buildWorld();E=[];PJ=[];FX=[];PK=[];
+G={t:0,kills:0,gens:0,scrap:0,rare:0,spawned:0,shake:0,sp:2,hit:false,over:false,endT:0,win:false,vig:0,intro:0,bx:null};mkP();
+if(m.k=='kill'){const n=Math.min(m.cap,m.tot);for(let k=0;k<n;k++)spawnE(m.ty[k%m.ty.length]);G.spawned=n}
+else if(m.k=='gen'){for(let k=0;k<3;k++){const a=k*2.1+.5;mkE('gen',Math.cos(a)*70,Math.sin(a)*70-10)}for(let k=0;k<4;k++)spawnE(m.ty[k%m.ty.length])}
+else{G.boss=mkBoss();spawnE('g');spawnE('g')}
+hideAll();$('hud').style.display='block';$('boss').style.display='none';$('res').classList.remove('on');
+if(m.k=='boss'){state='intro';G.intro=4.8;$('big').style.display='block';$('big').innerHTML='<h1>TITAN PRIME</h1><p>Apex war machine — shatter the plates, then crack the core</p>';G.shake=1}
+else{state='play';lock();msg('MISSION START',2)}clock.getDelta()}
+function spawnLogic(dt){G.sp-=dt;if(G.sp>0||G.endT>0)return;G.sp=3;const al=E.filter(e=>e.t!='gen'&&!e.boss).length;
+if(m.k=='kill'&&G.spawned<m.tot&&al<m.cap){spawnE(m.ty[Math.random()*m.ty.length|0]);G.spawned++}else if(m.k=='gen'&&al<m.cap)spawnE(m.ty[Math.random()*m.ty.length|0])}
+function intro(dt){G.intro-=dt;const b=G.boss,a=1.2+(4.8-G.intro)*.5;cam.position.set(b.x+Math.sin(a)*62,9+(4.8-G.intro)*2.5,b.z+Math.cos(a)*62);cam.lookAt(b.x,13,b.z);if(cam.fov!=65){cam.fov=65;cam.updateProjectionMatrix()}
+b.g.rotation.y=Math.atan2(P.x-b.x,P.z-b.z);b.wl+=dt*3;walk(b.rig,b.wl,.4);if(Math.random()<dt*2)G.shake=.4;if(fl)fl.intensity=0;updFX(dt);
+if(G.intro<=0){state='play';$('big').style.display='none';lock();msg('DESTROY TITAN PRIME',2.5)}}
+function upd(dt){if(state=='intro'){intro(dt);return}
+G.t+=dt;moveP(dt);camUpd(dt);calcAim();fireP();updE(dt);updPJ(dt);updPK(dt);spawnLogic(dt);updFX(dt);hud(dt);
+if(G.bx&&G.endT>0&&Math.random()<dt*9)boom(G.bx.clone().add(V3(rnd(-8,8),rnd(-8,10),rnd(-8,8))),rnd(6,12));
+if(G.endT>0){G.endT-=dt;if(G.endT<=0)end(G.win)}}
+function end(win){if(state=='res')return;state='res';try{document.exitPointerLock()}catch(e){}$('hud').style.display='none';const c=m.ch;
+let ok=false;if(win)ok=c.t=='time'?G.t<=c.v:c.t=='nohit'?!G.hit:!G.over;let s=G.scrap,r=G.rare,extra='';
+if(win){s+=m.rw[0];r+=m.rw[1];if(!S.clr.includes(mi))S.clr.push(mi);if(ok&&!S.ch.includes(mi)){S.ch.push(mi);s+=150;r+=1;extra=' (+150 scrap, +1 rare)'}}else s=Math.floor(s/2);
+S.scrap+=s;S.rare+=r;save();const t=G.t|0;
+$('res').innerHTML=`<h1 style="color:${win?'#6f6':'#f55'}">${win?'MISSION COMPLETE':'MECH LOST'}</h1><div class="card"><b>${m.n}</b><br>Time ${(t/60|0)}:${String(t%60).padStart(2,'0')} · Kills ${G.kills+G.gens}<br>Scrap gained <b>${s}</b> · Rare <b style="color:#c5f">${r}</b>${win?'<br>Challenge: '+c.l+' — '+(ok?'<b style="color:#6f6">DONE</b>'+extra:'not met'):'<br><small>Half of scrap salvaged.</small>'}</div>
+<div class="row"><button data-a="hangar">Hangar</button><button data-a="launch:${mi}">Retry</button>${win&&mi<M.length-1?`<button data-a="launch:${mi+1}">Next mission</button>`:''}<button data-a="mis">Missions</button></div>`;show('res')}
+/* ---------- hud ---------- */
+{const B=[['HULL','bh','#e24'],['ARMOR','ba','#4af'],['HEAT','bt','#fa2'],['JETS','bj','#6e6']];$('bars').innerHTML=B.map(b=>`<div class="b"><span>${b[0]}</span><i><u id="${b[1]}" style="background:${b[2]}"></u></i></div>`).join('')}
+function hud(dt){const set=(id,v)=>$(id).style.width=clamp(v,0,100)+'%';set('bh',P.hp/P.mhp*100);set('ba',P.ar/P.mar*100);set('bt',P.heat);$('bt').style.background=P.over?'#f22':'#fa2';set('bj',P.fuel/P.fm*100);
+const am=k=>W[k].ammo===Infinity?'∞':P.ammo[k]|0,ch=(n,c)=>`<span class="${c>0?'':'rdy'}">${n} ${c>0?c.toFixed(1):'RDY'}</span>`;
+$('wp').innerHTML=`<div>[LMB] ${W[S.p].n} <b>${am(S.p)}</b></div><div>[RMB] ${W[S.s].n} <b>${am(S.s)}</b></div>${P.over?'<div style="color:#f44">OVERHEATED</div>':''}<div>${ch('DASH',P.cd.dash)}${ch('MELEE',P.cd.mel)}${P.od>0?`<span class="rdy">OVERDRIVE ${P.od.toFixed(1)}</span>`:ch('OVERDRIVE',P.cd.od)}</div>`;
+const t=G.t|0;$('obj').innerHTML=(m.k=='kill'?`Destroy hostile machines ${G.kills}/${m.tot}`:m.k=='gen'?`Destroy reactor generators ${G.gens}/${m.tot}`:'Destroy TITAN PRIME')+`<br><small>${(t/60|0)}:${String(t%60).padStart(2,'0')} · Optional: ${m.ch.l}</small>`;
+const b=G.boss;if(b&&!b.dead){$('boss').style.display='block';$('bn').textContent='TITAN PRIME — PHASE '+b.ph;set('bb',b.hp/b.mhp*100);$('bp').textContent='Armor plates: '+b.pl.filter(p=>p.hp>0).length+'/4'}else $('boss').style.display='none';
+msgT-=dt;$('msg').style.opacity=msgT>0?Math.min(1,msgT):0;G.vig=Math.max(0,G.vig-dt);$('vig').style.opacity=G.vig}
+/* ---------- screens ---------- */
+function misScreen(){$('mis').innerHTML='<h2>MISSION SELECT</h2><div class="row">'+M.map((x,i)=>{const un=i==0||S.clr.includes(i-1);return`<div class="card"><h3>${i+1}. ${x.n}</h3>${x.d}<br><small>Reward ${x.rw[0]} scrap${x.rw[1]?' + '+x.rw[1]+' rare':''}<br>Challenge: ${x.ch.l} ${S.ch.includes(i)?'✔':''}${S.clr.includes(i)?'<br>Cleared':''}</small><br><br><button data-a="launch:${i}" ${un?'':'disabled'}>${un?'Launch':'Locked'}</button></div>`}).join('')+'</div><div class="row"><button data-a="hangar">Hangar</button><button data-a="menu">Back</button></div>';show('mis')}
+function hangarScreen(){const ups=[['spd','Leg Servos','+10% speed'],['arm','Armor Plating','+60 armor integrity'],['rea','Reactor Core','shorter cooldowns, more fuel & overdrive'],['heat','Heat Sinks','+4/s cooling']];
+$('hangar').innerHTML=`<h2>HANGAR</h2><div>Scrap <b>${S.scrap}</b> · Rare components <b style="color:#c5f">${S.rare}</b></div><h3>Upgrades</h3>`+ups.map(u=>{const l=S.up[u[0]],cs=90*(l+1),cr=l>=3?l-2:0,ok=l<5&&S.scrap>=cs&&S.rare>=cr;return`<div class="line"><span>${u[1]} Lv${l}/5<small>${u[2]}</small></span><button data-a="up:${u[0]}" ${ok?'':'disabled'}>${l>=5?'MAX':cs+'s'+(cr?' '+cr+'r':'')}</button></div>`}).join('')+'<h3>Weapons</h3>'+Object.keys(W).map(k=>{const w=W[k],o=S.own.includes(k),ok=S.scrap>=w.cost[0]&&S.rare>=w.cost[1];
+return`<div class="line"><span>${w.n}${S.p==k?' [L]':''}${S.s==k?' [R]':''}<small>${w.d} · DMG ${w.dmg} · Heat ${w.heat} · Weight ${w.w*100|0}%</small></span>${o?`<span><button data-a="eqp:${k}" ${S.p==k?'disabled':''}>L</button> <button data-a="eqs:${k}" ${S.s==k?'disabled':''}>R</button></span>`:`<button data-a="buy:${k}" ${ok?'':'disabled'}>${w.cost[0]}s ${w.cost[1]}r</button>`}</div>`}).join('')+'<div class="row" style="margin-top:8px"><button data-a="mis">Missions</button><button data-a="menu">Menu</button></div>';show('hangar')}
+function lock(){try{const p=R.domElement.requestPointerLock&&R.domElement.requestPointerLock();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
+function pause(){if(state!='play')return;state='pause';try{document.exitPointerLock()}catch(e){}show('pause')}
+function resume(){if(state!='pause')return;hideAll();state='play';lock();clock.getDelta()}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b||b.disabled)return;const[a,v]=b.dataset.a.split(':');
+if(a=='menu'){state='menu';show('menu')}else if(a=='mis'){state='mis';misScreen()}else if(a=='hangar'){state='hangar';rebuildHM();hangarScreen()}
+else if(a=='launch')startMission(+v);else if(a=='resume')resume();else if(a=='restart')startMission(mi);else if(a=='abort'){state='menu';$('hud').style.display='none';show('menu')}
+else if(a=='reset'){if(confirm('Erase all progress?')){S=SD();save();rebuildHM();msg('',0)}}
+else if(a=='up'){const l=S.up[v],cs=90*(l+1),cr=l>=3?l-2:0;if(l<5&&S.scrap>=cs&&S.rare>=cr){S.scrap-=cs;S.rare-=cr;S.up[v]++;save();hangarScreen()}}
+else if(a=='buy'){const w=W[v];if(S.scrap>=w.cost[0]&&S.rare>=w.cost[1]&&!S.own.includes(v)){S.scrap-=w.cost[0];S.rare-=w.cost[1];S.own.push(v);save();hangarScreen()}}
+else if(a=='eqp'||a=='eqs'){S[a=='eqp'?'p':'s']=v;save();rebuildHM();hangarScreen()}});
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code=='Escape'||e.code=='KeyP'){if(state=='play')pause();else if(state=='pause')resume()}
+if(state=='intro'&&(e.code=='Space'||e.code=='Enter'))G.intro=0;if(e.code=='KeyC'&&state=='play'){camMode^=1;msg(camMode?'HIGH CHASE CAM':'SHOULDER CAM',1)}if((state=='play'||state=='intro')&&['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});
+addEventListener('keyup',e=>{keys[e.code]=false});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;mouse[0]=mouse[2]=false;pause()});
+R.domElement.addEventListener('mousedown',e=>{mouse[e.button]=true;if(state=='play'&&document.pointerLockElement!==R.domElement)lock()});
+addEventListener('mouseup',e=>{mouse[e.button]=false});addEventListener('contextmenu',e=>e.preventDefault());
+addEventListener('mousemove',e=>{if(state=='play'&&(document.pointerLockElement===R.domElement||mouse[0]||mouse[2])){P.yaw-=e.movementX*.0023;P.pit=clamp(P.pit-e.movementY*.002,-.45,.7)}});
+document.addEventListener('pointerlockchange',()=>{if(state=='play'&&document.pointerLockElement!==R.domElement)pause()});
+/* ---------- loop ---------- */
+function loop(){requestAnimationFrame(loop);const dt=Math.min(.05,clock.getDelta());
+try{if(state=='play'||state=='intro'){upd(dt);R.render(sc,cam)}else if(state=='pause'||state=='res'){R.render(sc,cam)}
+else{const t=performance.now()/1000;hm.g.rotation.y+=dt*.5;walk(hm,0,0);hm.thr.forEach(f=>f.scale.y=.5+Math.sin(t*20)*.15);hm.arms.forEach(a=>a.a.rotation.x=-.15);if(cam.fov!=65){cam.fov=65;cam.updateProjectionMatrix()}cam.position.set(16,10,28);cam.lookAt(-6,6.5,0);R.render(hs,cam)}}
+catch(err){console.error(err);state='menu';$('hud').style.display='none';fail('A runtime error occurred: '+err.message)}}
+rebuildHM();loop();
+})();
+</script></body></html>
